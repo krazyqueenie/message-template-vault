@@ -1,0 +1,521 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Message Vault</title>
+<style>
+  body{ margin:0; font-family:Arial, Helvetica, sans-serif; background:#f6f6f6; color:#111; }
+  .app{ display:grid; grid-template-columns: 320px 1fr; height:100vh; }
+  .left{ border-right:1px solid #ddd; background:#fff; display:flex; flex-direction:column; }
+  .right{ display:flex; flex-direction:column; }
+
+  .topbar{ padding:10px; border-bottom:1px solid #eee; display:flex; gap:8px; align-items:center; }
+  .topbar input{ width:100%; padding:8px 10px; border:1px solid #ddd; border-radius:8px; font-weight:700; }
+  .btn{ cursor:pointer; border:none; background:#0e78d5; color:#fff; font-weight:800; padding:8px 10px; border-radius:8px; }
+  .btn:disabled{ opacity:.45; cursor:not-allowed; }
+  .btn2{ cursor:pointer; border:1px solid #ddd; background:#fff; color:#111; font-weight:800; padding:8px 10px; border-radius:8px; }
+
+  .list{ overflow:auto; padding:8px; }
+  .item{ border:1px solid #e5e5e5; border-radius:10px; padding:10px; margin:8px 0; cursor:pointer; background:#fff; }
+  .item.active{ border-color:#0e78d5; box-shadow:0 0 0 2px rgba(14,120,213,.12); }
+  .itemTitle{ font-weight:900; }
+  .itemMeta{ font-size:12px; opacity:.7; margin-top:4px; }
+
+  .editorWrap{ padding:12px; }
+  .titleRow{ display:flex; gap:8px; align-items:center; }
+  #title{ flex:1; padding:10px 12px; border:1px solid #ddd; border-radius:10px; font-weight:900; font-size:16px; }
+  #tags{ width:280px; padding:10px 12px; border:1px solid #ddd; border-radius:10px; font-weight:800; }
+
+  .toolbar{ display:flex; flex-wrap:wrap; gap:8px; padding:10px 0 8px; }
+  .tool{ cursor:pointer; border:1px solid #ddd; background:#fff; padding:8px 10px; border-radius:10px; font-weight:900; }
+  .tool:hover{ background:#f3f3f3; }
+
+  .editor{
+    min-height:220px;
+    background:#fff;
+    border:1px solid #ddd;
+    border-radius:12px;
+    padding:12px;
+    line-height:1.35;
+    font-size:14px;
+  }
+  .editor:focus{ outline:none; box-shadow:0 0 0 2px rgba(14,120,213,.12); }
+
+  .actions{ display:flex; gap:8px; padding:10px 0; flex-wrap:wrap; }
+  .subtle{ font-size:12px; opacity:.7; }
+
+  .history{ margin-top:10px; background:#fff; border:1px solid #ddd; border-radius:12px; overflow:hidden; }
+  .historyHead{ padding:10px 12px; font-weight:900; background:#fafafa; border-bottom:1px solid #eee; display:flex; justify-content:space-between; align-items:center; }
+  .historyList{ max-height:220px; overflow:auto; }
+  .snap{
+    border-bottom:1px solid #eee;
+    padding:10px 12px;
+    display:flex;
+    justify-content:space-between;
+    align-items:center;
+    gap:10px;
+  }
+  .snap:last-child{ border-bottom:none; }
+  .snapTime{ font-weight:900; font-size:13px; }
+  .snapBtns{ display:flex; gap:6px; }
+  .mini{ cursor:pointer; border:1px solid #ddd; background:#fff; padding:6px 8px; border-radius:8px; font-weight:900; }
+  .mini:hover{ background:#f3f3f3; }
+
+  @media(max-width: 980px){
+    .app{ grid-template-columns: 1fr; }
+    .left{ height:44vh; }
+    .right{ height:56vh; }
+    #tags{ width:100%; }
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="left">
+    <div class="topbar">
+      <input id="search" placeholder="Search titles, tags, or text..." />
+      <button class="btn" id="newBtn">New</button>
+    </div>
+    <div class="topbar" style="border-top:0;">
+      <button class="btn2" id="exportBtn">Export</button>
+      <button class="btn2" id="importBtn">Import</button>
+      <input id="fileInput" type="file" accept="application/json" style="display:none;" />
+      <span class="subtle" id="status"></span>
+    </div>
+    <div class="list" id="list"></div>
+  </div>
+
+  <div class="right">
+    <div class="editorWrap">
+      <div class="titleRow">
+        <input id="title" placeholder="Template title (e.g., Cancel Warning v2)" />
+        <input id="tags" placeholder="Tags (comma separated) e.g. cancel, quote, portal" />
+      </div>
+
+      <div class="toolbar">
+        <button class="tool" data-cmd="bold"><b>B</b></button>
+        <button class="tool" data-cmd="italic"><i>I</i></button>
+        <button class="tool" data-cmd="underline"><u>U</u></button>
+        <button class="tool" data-cmd="insertUnorderedList">• List</button>
+        <button class="tool" id="hrBtn">Line</button>
+        <button class="tool" id="linkBtn">Link</button>
+      </div>
+
+      <div id="editor" class="editor" contenteditable="true"></div>
+
+      <div class="actions">
+        <button class="btn" id="saveBtn">Save</button>
+        <button class="btn2" id="copyBtn">Copy</button>
+        <button class="btn2" id="snapshotBtn">Save Version</button>
+        <button class="btn2" id="dupBtn">Duplicate</button>
+        <button class="btn2" id="delBtn">Delete</button>
+        <span class="subtle" id="hint"></span>
+      </div>
+
+      <div class="history">
+        <div class="historyHead">
+          <span>Version History</span>
+          <span class="subtle" id="histCount"></span>
+        </div>
+        <div class="historyList" id="historyList"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+(() => {
+  const LS_KEY = "message_vault_v1";
+
+  /** Item:
+   * { id, title, tags:[], html, updatedAt, createdAt, history:[{ts, title, tags, html}] }
+   */
+  let db = { items: [], activeId: null };
+
+  const $ = (id) => document.getElementById(id);
+
+  const listEl = $("list");
+  const searchEl = $("search");
+  const statusEl = $("status");
+  const hintEl = $("hint");
+
+  const titleEl = $("title");
+  const tagsEl = $("tags");
+  const editorEl = $("editor");
+
+  const saveBtn = $("saveBtn");
+  const copyBtn = $("copyBtn");
+  const snapshotBtn = $("snapshotBtn");
+  const dupBtn = $("dupBtn");
+  const delBtn = $("delBtn");
+  const newBtn = $("newBtn");
+  const exportBtn = $("exportBtn");
+  const importBtn = $("importBtn");
+  const fileInput = $("fileInput");
+
+  const historyListEl = $("historyList");
+  const histCountEl = $("histCount");
+
+  function nowTs(){ return new Date().toISOString(); }
+  function nice(ts){
+    const d = new Date(ts);
+    return d.toLocaleString();
+  }
+
+  function load(){
+    try{
+      const raw = localStorage.getItem(LS_KEY);
+      if(raw) db = JSON.parse(raw);
+    }catch(e){}
+    if(!db.items) db = { items: [], activeId: null };
+
+    // seed (first run)
+    if(db.items.length === 0){
+      const seed = makeItem("Cancel fee (neutral)", ["cancel","fees"], 
+        `<b>Per the accepted Terms & Conditions</b>, a full cancellation fee applies. If you prefer, we can offer a reschedule option instead.<hr><i>(Edit this template as needed.)</i>`);
+      db.items.push(seed);
+      db.activeId = seed.id;
+      save();
+    }
+
+    if(!db.activeId && db.items[0]) db.activeId = db.items[0].id;
+  }
+
+  function save(){
+    localStorage.setItem(LS_KEY, JSON.stringify(db));
+    statusEl.textContent = "Saved";
+    setTimeout(()=> statusEl.textContent = "", 800);
+  }
+
+  function uid(){
+    return Math.random().toString(16).slice(2) + Date.now().toString(16);
+  }
+
+  function makeItem(title, tags, html){
+    const ts = nowTs();
+    return {
+      id: uid(),
+      title: title || "Untitled",
+      tags: Array.isArray(tags) ? tags : [],
+      html: html || "",
+      createdAt: ts,
+      updatedAt: ts,
+      history: []
+    };
+  }
+
+  function activeItem(){
+    return db.items.find(x => x.id === db.activeId) || null;
+  }
+
+  function setActive(id){
+    db.activeId = id;
+    render();
+  }
+
+  function getFilteredItems(){
+    const q = (searchEl.value || "").trim().toLowerCase();
+    if(!q) return db.items.slice().sort((a,b)=> b.updatedAt.localeCompare(a.updatedAt));
+
+    return db.items
+      .filter(it=>{
+        const hay = [
+          it.title,
+          (it.tags||[]).join(" "),
+          stripHtml(it.html)
+        ].join(" ").toLowerCase();
+        return hay.includes(q);
+      })
+      .sort((a,b)=> b.updatedAt.localeCompare(a.updatedAt));
+  }
+
+  function stripHtml(html){
+    const div = document.createElement("div");
+    div.innerHTML = html || "";
+    return div.textContent || div.innerText || "";
+  }
+
+  function renderList(){
+    const items = getFilteredItems();
+    listEl.innerHTML = "";
+
+    items.forEach(it=>{
+      const div = document.createElement("div");
+      div.className = "item" + (it.id === db.activeId ? " active" : "");
+      div.innerHTML = `
+        <div class="itemTitle">${escapeHtml(it.title)}</div>
+        <div class="itemMeta">${(it.tags||[]).join(", ")} • ${nice(it.updatedAt)}</div>
+      `;
+      div.onclick = ()=> setActive(it.id);
+      listEl.appendChild(div);
+    });
+  }
+
+  function renderEditor(){
+    const it = activeItem();
+    const has = !!it;
+
+    [titleEl, tagsEl, editorEl, saveBtn, copyBtn, snapshotBtn, dupBtn, delBtn]
+      .forEach(el => el.disabled = !has);
+
+    if(!it){
+      titleEl.value = "";
+      tagsEl.value = "";
+      editorEl.innerHTML = "";
+      hintEl.textContent = "";
+      return;
+    }
+
+    titleEl.value = it.title || "";
+    tagsEl.value = (it.tags || []).join(", ");
+    editorEl.innerHTML = it.html || "";
+
+    hintEl.textContent = `Created: ${nice(it.createdAt)} • Updated: ${nice(it.updatedAt)}`;
+  }
+
+  function renderHistory(){
+    const it = activeItem();
+    historyListEl.innerHTML = "";
+    if(!it){ histCountEl.textContent = ""; return; }
+
+    const hist = (it.history || []).slice().sort((a,b)=> b.ts.localeCompare(a.ts));
+    histCountEl.textContent = hist.length ? `${hist.length} saved` : "none";
+
+    if(hist.length === 0){
+      const div = document.createElement("div");
+      div.className = "snap";
+      div.innerHTML = `<div class="snapTime" style="opacity:.6">No versions yet</div><div></div>`;
+      historyListEl.appendChild(div);
+      return;
+    }
+
+    hist.forEach(snap=>{
+      const row = document.createElement("div");
+      row.className = "snap";
+      row.innerHTML = `
+        <div>
+          <div class="snapTime">${nice(snap.ts)}</div>
+          <div class="subtle">${escapeHtml(snap.title || "")} • ${(snap.tags||[]).join(", ")}</div>
+        </div>
+        <div class="snapBtns">
+          <button class="mini" data-act="restore" data-ts="${snap.ts}">Restore</button>
+          <button class="mini" data-act="copy" data-ts="${snap.ts}">Copy</button>
+          <button class="mini" data-act="delete" data-ts="${snap.ts}">Delete</button>
+        </div>
+      `;
+      historyListEl.appendChild(row);
+    });
+  }
+
+  function render(){
+    renderList();
+    renderEditor();
+    renderHistory();
+  }
+
+  function escapeHtml(s){
+    return (s||"").replace(/[&<>"']/g, c => ({
+      "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"
+    }[c]));
+  }
+
+  // Toolbar
+  document.querySelectorAll(".tool[data-cmd]").forEach(btn=>{
+    btn.addEventListener("click", ()=>{
+      document.execCommand(btn.dataset.cmd, false, null);
+      editorEl.focus();
+    });
+  });
+  $("hrBtn").addEventListener("click", ()=>{
+    document.execCommand("insertHorizontalRule", false, null);
+    editorEl.focus();
+  });
+  $("linkBtn").addEventListener("click", ()=>{
+    const url = prompt("Paste link URL:");
+    if(!url) return;
+    document.execCommand("createLink", false, url);
+    editorEl.focus();
+  });
+
+  // Save
+  saveBtn.addEventListener("click", ()=>{
+    const it = activeItem();
+    if(!it) return;
+
+    it.title = (titleEl.value || "Untitled").trim() || "Untitled";
+    it.tags = (tagsEl.value || "")
+      .split(",").map(x=>x.trim()).filter(Boolean);
+
+    it.html = editorEl.innerHTML || "";
+    it.updatedAt = nowTs();
+
+    save();
+    render();
+  });
+
+  // Copy (copies rich text as plain text + HTML works in many places; CRM usually takes plain text)
+  copyBtn.addEventListener("click", async ()=>{
+    const it = activeItem();
+    if(!it) return;
+
+    // Try HTML clipboard (best effort). Fallback to text.
+    const html = editorEl.innerHTML || "";
+    const text = stripHtml(html);
+
+    try{
+      await navigator.clipboard.write([
+        new ClipboardItem({
+          "text/html": new Blob([html], {type:"text/html"}),
+          "text/plain": new Blob([text], {type:"text/plain"})
+        })
+      ]);
+      copyBtn.textContent = "Copied!";
+    }catch(e){
+      try{
+        await navigator.clipboard.writeText(text);
+        copyBtn.textContent = "Copied!";
+      }catch(_){}
+    }
+    setTimeout(()=> copyBtn.textContent = "Copy", 900);
+  });
+
+  // Save Version (snapshot)
+  snapshotBtn.addEventListener("click", ()=>{
+    const it = activeItem();
+    if(!it) return;
+
+    it.history = it.history || [];
+    it.history.push({
+      ts: nowTs(),
+      title: (titleEl.value || it.title || "").trim(),
+      tags: (tagsEl.value || "").split(",").map(x=>x.trim()).filter(Boolean),
+      html: editorEl.innerHTML || ""
+    });
+
+    it.updatedAt = nowTs();
+    save();
+    renderHistory();
+  });
+
+  // Duplicate
+  dupBtn.addEventListener("click", ()=>{
+    const it = activeItem();
+    if(!it) return;
+    const dupe = makeItem(it.title + " (copy)", (it.tags||[]).slice(), it.html);
+    dupe.history = (it.history || []).slice();
+    db.items.push(dupe);
+    db.activeId = dupe.id;
+    save();
+    render();
+  });
+
+  // Delete
+  delBtn.addEventListener("click", ()=>{
+    const it = activeItem();
+    if(!it) return;
+    const ok = confirm(`Delete "${it.title}"?`);
+    if(!ok) return;
+
+    db.items = db.items.filter(x=> x.id !== it.id);
+    db.activeId = db.items[0]?.id || null;
+    save();
+    render();
+  });
+
+  // History actions
+  historyListEl.addEventListener("click", async (e)=>{
+    const btn = e.target.closest("button[data-act]");
+    if(!btn) return;
+    const act = btn.dataset.act;
+    const ts = btn.dataset.ts;
+
+    const it = activeItem();
+    if(!it || !it.history) return;
+    const idx = it.history.findIndex(h=> h.ts === ts);
+    if(idx === -1) return;
+
+    const snap = it.history[idx];
+
+    if(act === "restore"){
+      titleEl.value = snap.title || it.title || "";
+      tagsEl.value = (snap.tags || []).join(", ");
+      editorEl.innerHTML = snap.html || "";
+      editorEl.focus();
+      return;
+    }
+
+    if(act === "copy"){
+      const html = snap.html || "";
+      const text = stripHtml(html);
+      try{
+        await navigator.clipboard.writeText(text);
+      }catch(_){}
+      btn.textContent = "Copied!";
+      setTimeout(()=> btn.textContent = "Copy", 900);
+      return;
+    }
+
+    if(act === "delete"){
+      const ok = confirm("Delete this version snapshot?");
+      if(!ok) return;
+      it.history.splice(idx, 1);
+      it.updatedAt = nowTs();
+      save();
+      renderHistory();
+    }
+  });
+
+  // New
+  newBtn.addEventListener("click", ()=>{
+    const it = makeItem("New template", [], "");
+    db.items.push(it);
+    db.activeId = it.id;
+    save();
+    render();
+    titleEl.focus();
+  });
+
+  // Search
+  searchEl.addEventListener("input", renderList);
+
+  // Export / Import
+  exportBtn.addEventListener("click", ()=>{
+    const blob = new Blob([JSON.stringify(db, null, 2)], {type:"application/json"});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "message_vault_export.json";
+    a.click();
+    URL.revokeObjectURL(url);
+  });
+
+  importBtn.addEventListener("click", ()=> fileInput.click());
+
+  fileInput.addEventListener("change", function(){
+    const file = this.files && this.files[0];
+    if(!file) return;
+    const reader = new FileReader();
+    reader.onload = (e)=>{
+      try{
+        const obj = JSON.parse(e.target.result);
+        if(!obj || !Array.isArray(obj.items)) throw new Error("Invalid export format");
+        db = obj;
+        if(!db.activeId && db.items[0]) db.activeId = db.items[0].id;
+        save();
+        render();
+      }catch(err){
+        alert("Import failed: " + err.message);
+      }
+    };
+    reader.readAsText(file);
+    this.value = "";
+  });
+
+  // Init
+  load();
+  render();
+})();
+</script>
+</body>
+</html>
